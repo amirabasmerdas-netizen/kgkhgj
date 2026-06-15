@@ -1,327 +1,545 @@
 """
-AMEL SELF55 - پایگاه داده
-مدیریت SQLite برای تنظیمات، دوستان، دشمنان و سشن‌ها
+AMEL SELF55 v2 — پایگاه داده
+SQLite کامل با پشتیبانی از تمام توابع مورد نیاز
 """
 
 import sqlite3
-import json
 import logging
 from datetime import datetime
-from config import DB_PATH, TIMEZONE
-
 import pytz
+
+from config import DB_PATH, TIMEZONE
 
 logger = logging.getLogger(__name__)
 tz = pytz.timezone(TIMEZONE)
 
 
-def get_connection():
-    """اتصال به پایگاه داده با پشتیبانی از thread"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _conn():
+    c = sqlite3.connect(DB_PATH, check_same_thread=False)
+    c.row_factory = sqlite3.Row
+    return c
 
+
+def now_iso():
+    return datetime.now(tz).isoformat()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  راه‌اندازی جداول
+# ══════════════════════════════════════════════════════════════════════════════
 
 def init_db():
-    """ایجاد جداول پایگاه داده"""
-    conn = get_connection()
-    cursor = conn.cursor()
+    c = _conn()
+    cur = c.cursor()
 
-    # ── جدول تنظیمات ──────────────────────────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
+    cur.executescript("""
+    CREATE TABLE IF NOT EXISTS settings (
+        owner_id  INTEGER,
+        key       TEXT,
+        value     TEXT,
+        PRIMARY KEY (owner_id, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+        owner_id    INTEGER PRIMARY KEY,
+        tg_user_id  INTEGER,
+        session_str TEXT,
+        created_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS friends (
+        owner_id  INTEGER,
+        user_id   INTEGER,
+        username  TEXT,
+        name      TEXT,
+        added_at  TEXT,
+        PRIMARY KEY (owner_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS enemies (
+        owner_id  INTEGER,
+        user_id   INTEGER,
+        username  TEXT,
+        name      TEXT,
+        added_at  TEXT,
+        PRIMARY KEY (owner_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS silent_chats (
+        owner_id INTEGER,
+        chat_id  INTEGER,
+        PRIMARY KEY (owner_id, chat_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS silent_users (
+        owner_id INTEGER,
+        user_id  INTEGER,
+        PRIMARY KEY (owner_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS deleted_messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id    INTEGER,
+        chat_id     INTEGER,
+        message_id  INTEGER,
+        sender_id   INTEGER,
+        sender_name TEXT,
+        text        TEXT,
+        media_path  TEXT,
+        deleted_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS message_slots (
+        owner_id   INTEGER,
+        slot       INTEGER,
+        content    TEXT,
+        saved_at   TEXT,
+        PRIMARY KEY (owner_id, slot)
+    );
+
+    CREATE TABLE IF NOT EXISTS scheduled_messages (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id  INTEGER,
+        chat_id   INTEGER,
+        message   TEXT,
+        send_at   TEXT,
+        sent      INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS tokens (
+        owner_id INTEGER PRIMARY KEY,
+        balance  INTEGER DEFAULT 0
+    );
     """)
 
-    # ── جدول دوستان ───────────────────────────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS friends (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            name TEXT,
-            added_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── جدول دشمنان ───────────────────────────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS enemies (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            name TEXT,
-            added_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── جدول پیام‌های حذف‌شده (ضد حذف) ─────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS deleted_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            message_id INTEGER,
-            sender_id INTEGER,
-            sender_name TEXT,
-            text TEXT,
-            media_path TEXT,
-            deleted_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── جدول اسلات‌های ذخیره پیام ────────────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS message_slots (
-            slot INTEGER PRIMARY KEY,
-            content TEXT,
-            saved_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── جدول پیام‌های زمان‌بندی‌شده ──────────────────────────────────────────
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scheduled_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            message TEXT,
-            send_at TEXT,
-            sent INTEGER DEFAULT 0
-        )
-    """)
-
-    # ── تنظیمات پیش‌فرض ───────────────────────────────────────────────────────
-    defaults = {
-        "self_active": "true",
-        "secretary_active": "false",
-        "anti_delete_active": "false",
-        "pv_lock_active": "false",
-        "anti_link_active": "false",
-        "auto_seen_active": "false",
-        "auto_reaction_active": "false",
-        "default_reaction": "👍",
-        "secretary_message": "سلام! در حال حاضر در دسترس نیستم. به زودی پاسخ می‌دهم. 🌸",
-        "spam_count": "5",
-        "translator_default_lang": "en",
-    }
-
-    for key, value in defaults.items():
-        cursor.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-            (key, value)
-        )
-
-    conn.commit()
-    conn.close()
-    logger.info("✅ پایگاه داده با موفقیت راه‌اندازی شد.")
+    c.commit()
+    c.close()
+    logger.info("✅ پایگاه داده راه‌اندازی شد.")
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع تنظیمات
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  تنظیمات
+# ══════════════════════════════════════════════════════════════════════════════
 
-def get_setting(key: str, default=None):
-    """دریافت یک تنظیم از پایگاه داده"""
-    conn = get_connection()
+def get_setting(owner_id: int, key: str, default=None):
+    c = _conn()
     try:
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        row = c.execute(
+            "SELECT value FROM settings WHERE owner_id=? AND key=?",
+            (owner_id, key)
+        ).fetchone()
         return row["value"] if row else default
     finally:
-        conn.close()
+        c.close()
 
 
-def set_setting(key: str, value: str):
-    """ذخیره یک تنظیم در پایگاه داده"""
-    conn = get_connection()
+def set_setting(owner_id: int, key: str, value: str):
+    c = _conn()
     try:
-        now = datetime.now(tz).isoformat()
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-            (key, str(value), now)
+        c.execute(
+            "INSERT OR REPLACE INTO settings (owner_id, key, value) VALUES (?,?,?)",
+            (owner_id, key, str(value))
         )
-        conn.commit()
+        c.commit()
     finally:
-        conn.close()
+        c.close()
 
 
-def get_all_settings() -> dict:
-    """دریافت همه تنظیمات"""
-    conn = get_connection()
+def get_all_settings(owner_id: int) -> dict:
+    c = _conn()
     try:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {row["key"]: row["value"] for row in rows}
+        rows = c.execute(
+            "SELECT key, value FROM settings WHERE owner_id=?", (owner_id,)
+        ).fetchall()
+        return {r["key"]: r["value"] for r in rows}
     finally:
-        conn.close()
+        c.close()
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع دوستان
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  کاربران / سشن
+# ══════════════════════════════════════════════════════════════════════════════
 
-def add_friend(user_id: int, username: str = "", name: str = ""):
-    """اضافه کردن دوست"""
-    conn = get_connection()
+def save_session(owner_id: int, session_str: str):
+    c = _conn()
     try:
-        now = datetime.now(tz).isoformat()
-        conn.execute(
-            "INSERT OR REPLACE INTO friends (user_id, username, name, added_at) VALUES (?, ?, ?, ?)",
-            (user_id, username, name, now)
+        c.execute(
+            "INSERT OR REPLACE INTO users (owner_id, session_str, created_at) VALUES (?,?,?)",
+            (owner_id, session_str, now_iso())
         )
-        conn.commit()
-        # اگر دشمن بود، حذف کن
-        conn.execute("DELETE FROM enemies WHERE user_id=?", (user_id,))
-        conn.commit()
+        c.commit()
     finally:
-        conn.close()
+        c.close()
 
 
-def remove_friend(user_id: int):
-    """حذف دوست"""
-    conn = get_connection()
+def get_session(owner_id: int) -> str:
+    c = _conn()
     try:
-        conn.execute("DELETE FROM friends WHERE user_id=?", (user_id,))
-        conn.commit()
+        row = c.execute(
+            "SELECT session_str FROM users WHERE owner_id=?", (owner_id,)
+        ).fetchone()
+        return row["session_str"] if row else ""
     finally:
-        conn.close()
+        c.close()
 
 
-def is_friend(user_id: int) -> bool:
-    """بررسی دوست بودن کاربر"""
-    conn = get_connection()
+def save_telegram_user_id(owner_id: int, tg_id: int):
+    c = _conn()
     try:
-        row = conn.execute("SELECT 1 FROM friends WHERE user_id=?", (user_id,)).fetchone()
-        return row is not None
-    finally:
-        conn.close()
-
-
-def get_all_friends() -> list:
-    """دریافت لیست همه دوستان"""
-    conn = get_connection()
-    try:
-        rows = conn.execute("SELECT * FROM friends ORDER BY added_at DESC").fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع دشمنان
-# ════════════════════════════════════════════════════════════════════════════════
-
-def add_enemy(user_id: int, username: str = "", name: str = ""):
-    """اضافه کردن دشمن"""
-    conn = get_connection()
-    try:
-        now = datetime.now(tz).isoformat()
-        conn.execute(
-            "INSERT OR REPLACE INTO enemies (user_id, username, name, added_at) VALUES (?, ?, ?, ?)",
-            (user_id, username, name, now)
+        c.execute(
+            "UPDATE users SET tg_user_id=? WHERE owner_id=?", (tg_id, owner_id)
         )
-        conn.commit()
-        # اگر دوست بود، حذف کن
-        conn.execute("DELETE FROM friends WHERE user_id=?", (user_id,))
-        conn.commit()
+        if c.execute("SELECT changes()").fetchone()[0] == 0:
+            c.execute(
+                "INSERT OR IGNORE INTO users (owner_id, tg_user_id, created_at) VALUES (?,?,?)",
+                (owner_id, tg_id, now_iso())
+            )
+        c.commit()
     finally:
-        conn.close()
+        c.close()
 
 
-def remove_enemy(user_id: int):
-    """حذف دشمن"""
-    conn = get_connection()
+def get_telegram_id_by_owner(owner_id: int):
+    c = _conn()
     try:
-        conn.execute("DELETE FROM enemies WHERE user_id=?", (user_id,))
-        conn.commit()
+        row = c.execute(
+            "SELECT tg_user_id FROM users WHERE owner_id=?", (owner_id,)
+        ).fetchone()
+        return row["tg_user_id"] if row else None
     finally:
-        conn.close()
+        c.close()
 
 
-def is_enemy(user_id: int) -> bool:
-    """بررسی دشمن بودن کاربر"""
-    conn = get_connection()
+def get_all_users() -> list:
+    c = _conn()
     try:
-        row = conn.execute("SELECT 1 FROM enemies WHERE user_id=?", (user_id,)).fetchone()
-        return row is not None
+        return [dict(r) for r in c.execute("SELECT * FROM users").fetchall()]
     finally:
-        conn.close()
+        c.close()
 
 
-def get_all_enemies() -> list:
-    """دریافت لیست همه دشمنان"""
-    conn = get_connection()
+def delete_user(owner_id: int):
+    c = _conn()
     try:
-        rows = conn.execute("SELECT * FROM enemies ORDER BY added_at DESC").fetchall()
-        return [dict(row) for row in rows]
+        c.execute("DELETE FROM users WHERE owner_id=?", (owner_id,))
+        c.execute("DELETE FROM settings WHERE owner_id=?", (owner_id,))
+        c.commit()
     finally:
-        conn.close()
+        c.close()
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع ضد حذف
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  دوستان
+# ══════════════════════════════════════════════════════════════════════════════
 
-def save_deleted_message(chat_id: int, message_id: int, sender_id: int,
-                          sender_name: str, text: str, media_path: str = ""):
-    """ذخیره پیام حذف‌شده"""
-    conn = get_connection()
+def add_friend(owner_id: int, user_id: int, username: str = "", name: str = ""):
+    c = _conn()
     try:
-        now = datetime.now(tz).isoformat()
-        conn.execute("""
-            INSERT INTO deleted_messages 
-            (chat_id, message_id, sender_id, sender_name, text, media_path, deleted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (chat_id, message_id, sender_id, sender_name, text, media_path, now))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def get_recent_deleted(chat_id: int, limit: int = 5) -> list:
-    """دریافت پیام‌های حذف‌شده اخیر یک چت"""
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT * FROM deleted_messages 
-            WHERE chat_id=? ORDER BY deleted_at DESC LIMIT ?
-        """, (chat_id, limit)).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع اسلات پیام
-# ════════════════════════════════════════════════════════════════════════════════
-
-def save_message_slot(slot: int, content: str):
-    """ذخیره پیام در اسلات"""
-    conn = get_connection()
-    try:
-        now = datetime.now(tz).isoformat()
-        conn.execute(
-            "INSERT OR REPLACE INTO message_slots (slot, content, saved_at) VALUES (?, ?, ?)",
-            (slot, content, now)
+        c.execute(
+            "INSERT OR REPLACE INTO friends (owner_id,user_id,username,name,added_at) VALUES (?,?,?,?,?)",
+            (owner_id, user_id, username or "", name or "", now_iso())
         )
-        conn.commit()
+        c.execute("DELETE FROM enemies WHERE owner_id=? AND user_id=?", (owner_id, user_id))
+        c.commit()
     finally:
-        conn.close()
+        c.close()
 
 
-def get_message_slot(slot: int) -> str | None:
-    """دریافت پیام از اسلات"""
-    conn = get_connection()
+def remove_friend(owner_id: int, user_id: int) -> bool:
+    c = _conn()
     try:
-        row = conn.execute("SELECT content FROM message_slots WHERE slot=?", (slot,)).fetchone()
-        return row["content"] if row else None
+        c.execute("DELETE FROM friends WHERE owner_id=? AND user_id=?", (owner_id, user_id))
+        c.commit()
+        return c.execute("SELECT changes()").fetchone()[0] > 0
     finally:
-        conn.close()
+        c.close()
 
 
-def get_all_slots() -> list:
-    """دریافت همه اسلات‌ها"""
-    conn = get_connection()
+def is_friend(owner_id: int, user_id: int) -> bool:
+    c = _conn()
     try:
-        rows = conn.execute("SELECT slot, content, saved_at FROM message_slots ORDER BY slot").fetchall()
-        return [dict(row) for row in rows]
+        return bool(c.execute(
+            "SELECT 1 FROM friends WHERE owner_id=? AND user_id=?", (owner_id, user_id)
+        ).fetchone())
     finally:
-        conn.close()
+        c.close()
+
+
+def get_friends(owner_id: int) -> list:
+    c = _conn()
+    try:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM friends WHERE owner_id=? ORDER BY added_at DESC", (owner_id,)
+        ).fetchall()]
+    finally:
+        c.close()
+
+
+def clear_friends(owner_id: int):
+    c = _conn()
+    try:
+        c.execute("DELETE FROM friends WHERE owner_id=?", (owner_id,))
+        c.commit()
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  دشمنان
+# ══════════════════════════════════════════════════════════════════════════════
+
+def add_enemy(owner_id: int, user_id: int, username: str = "", name: str = ""):
+    c = _conn()
+    try:
+        c.execute(
+            "INSERT OR REPLACE INTO enemies (owner_id,user_id,username,name,added_at) VALUES (?,?,?,?,?)",
+            (owner_id, user_id, username or "", name or "", now_iso())
+        )
+        c.execute("DELETE FROM friends WHERE owner_id=? AND user_id=?", (owner_id, user_id))
+        c.commit()
+    finally:
+        c.close()
+
+
+def remove_enemy(owner_id: int, user_id: int) -> bool:
+    c = _conn()
+    try:
+        c.execute("DELETE FROM enemies WHERE owner_id=? AND user_id=?", (owner_id, user_id))
+        c.commit()
+        return c.execute("SELECT changes()").fetchone()[0] > 0
+    finally:
+        c.close()
+
+
+def is_enemy(owner_id: int, user_id: int) -> bool:
+    c = _conn()
+    try:
+        return bool(c.execute(
+            "SELECT 1 FROM enemies WHERE owner_id=? AND user_id=?", (owner_id, user_id)
+        ).fetchone())
+    finally:
+        c.close()
+
+
+def get_enemies(owner_id: int) -> list:
+    c = _conn()
+    try:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM enemies WHERE owner_id=? ORDER BY added_at DESC", (owner_id,)
+        ).fetchall()]
+    finally:
+        c.close()
+
+
+def clear_enemies(owner_id: int):
+    c = _conn()
+    try:
+        c.execute("DELETE FROM enemies WHERE owner_id=?", (owner_id,))
+        c.commit()
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  سایلنت
+# ══════════════════════════════════════════════════════════════════════════════
+
+def add_silent_chat(owner_id: int, chat_id: int):
+    c = _conn()
+    try:
+        c.execute("INSERT OR IGNORE INTO silent_chats VALUES (?,?)", (owner_id, chat_id))
+        c.commit()
+    finally:
+        c.close()
+
+
+def remove_silent_chat(owner_id: int, chat_id: int):
+    c = _conn()
+    try:
+        c.execute("DELETE FROM silent_chats WHERE owner_id=? AND chat_id=?", (owner_id, chat_id))
+        c.commit()
+    finally:
+        c.close()
+
+
+def is_silent_chat(owner_id: int, chat_id: int) -> bool:
+    c = _conn()
+    try:
+        return bool(c.execute(
+            "SELECT 1 FROM silent_chats WHERE owner_id=? AND chat_id=?", (owner_id, chat_id)
+        ).fetchone())
+    finally:
+        c.close()
+
+
+def add_silent_user(owner_id: int, user_id: int):
+    c = _conn()
+    try:
+        c.execute("INSERT OR IGNORE INTO silent_users VALUES (?,?)", (owner_id, user_id))
+        c.commit()
+    finally:
+        c.close()
+
+
+def remove_silent_user(owner_id: int, user_id: int):
+    c = _conn()
+    try:
+        c.execute("DELETE FROM silent_users WHERE owner_id=? AND user_id=?", (owner_id, user_id))
+        c.commit()
+    finally:
+        c.close()
+
+
+def is_silent_user(owner_id: int, user_id: int) -> bool:
+    c = _conn()
+    try:
+        return bool(c.execute(
+            "SELECT 1 FROM silent_users WHERE owner_id=? AND user_id=?", (owner_id, user_id)
+        ).fetchone())
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ضد حذف
+# ══════════════════════════════════════════════════════════════════════════════
+
+def save_deleted_message(owner_id, chat_id, message_id, sender_id, sender_name, text, media_path=""):
+    c = _conn()
+    try:
+        c.execute("""
+            INSERT INTO deleted_messages
+            (owner_id,chat_id,message_id,sender_id,sender_name,text,media_path,deleted_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (owner_id, chat_id, message_id, sender_id, sender_name, text, media_path, now_iso()))
+        c.commit()
+    finally:
+        c.close()
+
+
+def get_recent_deleted(owner_id: int, chat_id: int = 0, limit: int = 5) -> list:
+    c = _conn()
+    try:
+        if chat_id:
+            rows = c.execute("""
+                SELECT * FROM deleted_messages WHERE owner_id=? AND chat_id=?
+                ORDER BY deleted_at DESC LIMIT ?
+            """, (owner_id, chat_id, limit)).fetchall()
+        else:
+            rows = c.execute("""
+                SELECT * FROM deleted_messages WHERE owner_id=?
+                ORDER BY deleted_at DESC LIMIT ?
+            """, (owner_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  اسلات پیام
+# ══════════════════════════════════════════════════════════════════════════════
+
+def save_message_slot(owner_id: int, slot: int, content: str):
+    c = _conn()
+    try:
+        c.execute(
+            "INSERT OR REPLACE INTO message_slots (owner_id,slot,content,saved_at) VALUES (?,?,?,?)",
+            (owner_id, slot, content, now_iso())
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def get_message_slot(owner_id: int, slot: int):
+    c = _conn()
+    try:
+        row = c.execute(
+            "SELECT * FROM message_slots WHERE owner_id=? AND slot=?", (owner_id, slot)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        c.close()
+
+
+def get_all_slots(owner_id: int) -> list:
+    c = _conn()
+    try:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM message_slots WHERE owner_id=? ORDER BY slot", (owner_id,)
+        ).fetchall()]
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ارسال زمان‌بندی‌شده
+# ══════════════════════════════════════════════════════════════════════════════
+
+def add_scheduled_message(owner_id: int, chat_id: int, message: str, send_at: str):
+    c = _conn()
+    try:
+        c.execute(
+            "INSERT INTO scheduled_messages (owner_id,chat_id,message,send_at) VALUES (?,?,?,?)",
+            (owner_id, chat_id, message, send_at)
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def get_pending_scheduled(owner_id: int) -> list:
+    now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+    c = _conn()
+    try:
+        return [dict(r) for r in c.execute("""
+            SELECT * FROM scheduled_messages
+            WHERE owner_id=? AND sent=0 AND send_at <= ?
+        """, (owner_id, now)).fetchall()]
+    finally:
+        c.close()
+
+
+def mark_scheduled_sent(msg_id: int):
+    c = _conn()
+    try:
+        c.execute("UPDATE scheduled_messages SET sent=1 WHERE id=?", (msg_id,))
+        c.commit()
+    finally:
+        c.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  توکن
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_token_balance(owner_id: int) -> int:
+    c = _conn()
+    try:
+        row = c.execute("SELECT balance FROM tokens WHERE owner_id=?", (owner_id,)).fetchone()
+        return row["balance"] if row else 0
+    finally:
+        c.close()
+
+
+def add_tokens(owner_id: int, amount: int):
+    c = _conn()
+    try:
+        c.execute(
+            "INSERT INTO tokens (owner_id,balance) VALUES (?,?) ON CONFLICT(owner_id) DO UPDATE SET balance=balance+?",
+            (owner_id, amount, amount)
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def deduct_tokens(owner_id: int, amount: int):
+    c = _conn()
+    try:
+        c.execute(
+            "UPDATE tokens SET balance=MAX(0,balance-?) WHERE owner_id=?", (amount, owner_id)
+        )
+        c.commit()
+    finally:
+        c.close()
