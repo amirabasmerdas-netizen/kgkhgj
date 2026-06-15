@@ -1,581 +1,811 @@
-"""
-AMEL SELF55 - ربات
-هسته اصلی سلف‌بات تلگرام با استفاده از Telethon
-"""
-
 import asyncio
-import logging
-import os
 import re
-import time
-from datetime import datetime
-from pathlib import Path
-
-import pytz
+import os
+import datetime
+import random
+import threading
 from telethon import TelegramClient, events
-from telethon.tl.types import (
-    MessageMediaPhoto, MessageMediaDocument,
-    User, PeerUser
-)
+from telethon.sessions import StringSession
+from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.errors import FloodWaitError
-
 import database as db
-from config import (
-    API_ID, API_HASH, SESSION_NAME, TIMEZONE,
-    SPAM_DELAY, MAX_MESSAGE_SLOTS, BOT_NAME
+import config
+from texts import ENEMY_REPLIES
+
+# ─── فونت‌ها ───────────────────────────────────────────────────────────────────
+FONTS = {
+    "0": lambda t: t,
+    "1": lambda t: _convert_font(t, "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"),
+    "2": lambda t: _convert_font(t, "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻"),
+    "3": lambda t: _convert_font(t, "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣"),
+    "4": lambda t: _convert_font(t, "ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ"),
+    "5": lambda t: _convert_font(t, "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳"),
+    "6": lambda t: _convert_font(t, "𝒜ℬ𝒞𝒟ℰℱ𝒢ℋℐ𝒥𝒦ℒℳ𝒩𝒪𝒫𝒬ℛ𝒮𝒯𝒰𝒱𝒲𝒳𝒴𝒵𝒶𝒷𝒸𝒹ℯ𝒻ℊ𝒽𝒾𝒿𝓀𝓁𝓂𝓃ℴ𝓅𝓆𝓇𝓈𝓉𝓊𝓋𝓌𝓍𝓎𝓏"),
+    "7": lambda t: "".join(c + "\u0336" for c in t),
+    "8": lambda t: "".join(c + "\u0332" for c in t),
+}
+_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+LINK_PATTERN = re.compile(
+    r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
 )
-from texts import get_enemy_reply, SECRETARY_DEFAULT, SYSTEM_MSGS, get_random_reaction
-
-# ── لاگ‌گذاری ────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-tz = pytz.timezone(TIMEZONE)
-
-# ── کلاینت تلگرام ─────────────────────────────────────────────────────────────
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-
-# ── متغیرهای حالت ─────────────────────────────────────────────────────────────
-spam_running: bool = False
-_me = None  # اطلاعات اکانت ما
+BADWORDS = ["مادرتو گاییدم", "بیناموس", "حرومزاده", "مادرجنده", "خارکصه", "مادرخر", "خارتو گاییدم"]
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  توابع کمکی
-# ════════════════════════════════════════════════════════════════════════════════
-
-def now_str() -> str:
-    """زمان فعلی به فرمت فارسی"""
-    return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-
-
-def is_self_active() -> bool:
-    return db.get_setting("self_active", "true") == "true"
+def _convert_font(text, chars):
+    result = []
+    for ch in text:
+        if ch in _ALPHA:
+            result.append(chars[_ALPHA.index(ch)])
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
-def is_secretary_active() -> bool:
-    return db.get_setting("secretary_active", "false") == "true"
+def _apply_font(owner_id, text):
+    font_id = db.get_setting(owner_id, "selected_font", "0")
+    fn = FONTS.get(font_id, FONTS["0"])
+    return fn(text)
 
 
-def is_anti_delete_active() -> bool:
-    return db.get_setting("anti_delete_active", "false") == "true"
+def persian_time():
+    iran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30))
+    now = datetime.datetime.now(iran_tz)
+    return f"{now.hour:02d}:{now.minute:02d}"
 
 
-def is_pv_lock_active() -> bool:
-    return db.get_setting("pv_lock_active", "false") == "true"
+# ─── BotManager: مدیریت چندین کلاینت همزمان ────────────────────────────────────
+class BotManager:
+    def __init__(self):
+        # {owner_id: {"client": TelegramClient, "task": asyncio.Task, "stop": bool}}
+        self._bots = {}
+        self._timers = {}  # {owner_id: threading.Timer}
 
+    def is_running(self, owner_id: int) -> bool:
+        entry = self._bots.get(owner_id)
+        return bool(entry and not entry["task"].done())
 
-def is_anti_link_active() -> bool:
-    return db.get_setting("anti_link_active", "false") == "true"
+    def get_client(self, owner_id: int):
+        entry = self._bots.get(owner_id)
+        return entry["client"] if entry else None
 
+    def _cancel_timer(self, owner_id: int):
+        t = self._timers.pop(owner_id, None)
+        if t:
+            t.cancel()
 
-def is_auto_seen_active() -> bool:
-    return db.get_setting("auto_seen_active", "false") == "true"
-
-
-def is_auto_reaction_active() -> bool:
-    return db.get_setting("auto_reaction_active", "false") == "true"
-
-
-def contains_link(text: str) -> bool:
-    """بررسی وجود لینک در متن"""
-    pattern = r"(https?://|t\.me/|@\w+|www\.)\S+"
-    return bool(re.search(pattern, text or ""))
-
-
-async def get_me():
-    global _me
-    if _me is None:
-        _me = await client.get_me()
-    return _me
-
-
-async def get_reply_sender(event):
-    """دریافت اطلاعات فرستنده پیام ریپلای‌شده"""
-    if not event.reply_to_msg_id:
+    def session_end_time(self, owner_id: int):
+        t = self._timers.get(owner_id)
+        if t and t.is_alive():
+            import time
+            remaining = t.interval - (time.time() - t._timer_start if hasattr(t, '_timer_start') else 0)
+            return max(0, remaining)
         return None
+
+    def start(self, owner_id: int, loop: asyncio.AbstractEventLoop, check_tokens: bool = True) -> bool:
+        if self.is_running(owner_id):
+            self.stop(owner_id)
+
+        # تشخیص مالک (رایگان، بدون توکن و بدون تایمر)
+        tg_id = db.get_telegram_id_by_owner(owner_id)
+        is_owner = (tg_id is not None and tg_id == config.OWNER_TG_ID)
+
+        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True و مالک نباشد)
+        tokens_deducted = 0
+        if config.BOT_TOKEN and check_tokens and not is_owner:
+            balance = db.get_token_balance(owner_id)
+            if balance < config.TOKENS_PER_SESSION:
+                return False
+            db.deduct_tokens(owner_id, config.TOKENS_PER_SESSION)
+            tokens_deducted = config.TOKENS_PER_SESSION
+
+        entry = {"client": None, "task": None, "stop": False, "is_owner": is_owner,
+                 "tokens_deducted": tokens_deducted, "owner_refunded": False}
+        self._bots[owner_id] = entry
+        task = asyncio.run_coroutine_threadsafe(
+            self._run_bot(owner_id), loop
+        )
+        entry["task"] = task
+
+        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت (فقط برای غیر مالک)
+        if config.BOT_TOKEN and not is_owner:
+            self._cancel_timer(owner_id)
+            timer = threading.Timer(
+                config.SESSION_HOURS * 3600, self.stop, args=[owner_id]
+            )
+            timer.daemon = True
+            timer.start()
+            self._timers[owner_id] = timer
+
+        return True
+
+    def stop(self, owner_id: int):
+        self._cancel_timer(owner_id)
+        entry = self._bots.get(owner_id)
+        if not entry:
+            return
+        entry["stop"] = True
+        cl = entry.get("client")
+        if cl and cl.is_connected():
+            try:
+                asyncio.run_coroutine_threadsafe(cl.disconnect(), asyncio.get_event_loop())
+            except Exception:
+                pass
+
+    def stop_all(self):
+        for oid in list(self._bots.keys()):
+            self.stop(oid)
+
+    async def _run_bot(self, owner_id: int):
+        entry = self._bots[owner_id]
+        retry_delay = 5
+
+        while not entry["stop"]:
+            try:
+                session_data = db.get_setting(owner_id, "session_data", "")
+                if not session_data:
+                    await asyncio.sleep(10)
+                    continue
+
+                cl = TelegramClient(
+                    StringSession(session_data),
+                    config.API_ID,
+                    config.API_HASH,
+                )
+                entry["client"] = cl
+                _register_handlers(cl, owner_id, entry)
+
+                await cl.start()
+                me = await cl.get_me()
+                print(f"✅ [{owner_id}] بات راه‌اندازی شد — {me.first_name} (@{me.username})")
+
+                # ذخیره telegram_user_id — برای تشخیص مالک
+                db.save_telegram_user_id(owner_id, me.id)
+
+                # تشخیص مالک: از طریق ID یا شماره تلفن
+                me_phone = (me.phone or "").lstrip("+")
+                owner_phone = getattr(config, "OWNER_PHONE", "").lstrip("+")
+                is_now_owner = (
+                    me.id == config.OWNER_TG_ID
+                    or (bool(owner_phone) and me_phone == owner_phone)
+                )
+
+                if is_now_owner:
+                    entry["is_owner"] = True
+                    self._cancel_timer(owner_id)
+                    # فقط یک بار توکن برگشت داده می‌شود
+                    if not entry.get("owner_refunded") and entry.get("tokens_deducted", 0) > 0:
+                        db.add_tokens(owner_id, entry["tokens_deducted"])
+                        entry["owner_refunded"] = True
+                        print(f"👑 [{owner_id}] مالک — {entry['tokens_deducted']} توکن برگشت داده شد")
+                    print(f"👑 [{owner_id}] مالک تشخیص (phone={me_phone}) — تایمر لغو — رایگان ♾️")
+
+                clock_task = asyncio.ensure_future(_clock_loop(cl, owner_id))
+                sched_task = asyncio.ensure_future(_scheduler_loop(cl, owner_id))
+
+                retry_delay = 5
+                await cl.run_until_disconnected()
+
+                clock_task.cancel()
+                sched_task.cancel()
+
+                if entry["stop"]:
+                    break
+                print(f"⚠️  [{owner_id}] اتصال قطع شد، اتصال مجدد...")
+
+            except Exception as e:
+                print(f"❌ [{owner_id}] خطا: {e}")
+                if entry["stop"]:
+                    break
+
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 120)
+
+        print(f"🛑 [{owner_id}] بات متوقف شد.")
+
+
+# نمونه مشترک
+bot_manager = BotManager()
+
+
+# ─── ثبت هندلرها (per-user) ────────────────────────────────────────────────────
+def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
+
+    @cl.on(events.NewMessage(incoming=True))
+    async def on_incoming(event):
+        msg = event.message
+        sender = await event.get_sender()
+        chat = await event.get_chat()
+        sender_id = getattr(sender, "id", 0)
+        chat_id = getattr(chat, "id", 0)
+        text = msg.text or ""
+
+        if db.is_silent_chat(owner_id, chat_id) or db.is_silent_user(owner_id, sender_id):
+            return
+
+        # ذخیره خودکار مدیا
+        if db.get_setting(owner_id, "auto_save_media") == "1" and msg.media:
+            try:
+                media_dir = f"saved_media/{owner_id}"
+                os.makedirs(media_dir, exist_ok=True)
+                await cl.download_media(msg, file=media_dir + "/")
+            except Exception:
+                pass
+
+        # ذخیره مدیای تایمدار
+        if event.is_private and msg.media:
+            ttl = getattr(msg.media, "ttl_seconds", None)
+            if ttl:
+                try:
+                    me = await cl.get_me()
+                    media_dir = f"saved_media/{owner_id}"
+                    os.makedirs(media_dir, exist_ok=True)
+                    path = await cl.download_media(msg, file=media_dir + "/")
+                    if path:
+                        await cl.send_file(me.id, path,
+                            caption=f"📥 مدیای تایمدار ذخیره شد\n👤 از: {getattr(sender, 'first_name', sender_id)} ({sender_id})")
+                except Exception:
+                    pass
+
+        # سین خودکار
+        if db.get_setting(owner_id, "auto_seen_active") == "1":
+            try:
+                await cl.send_read_acknowledge(chat_id, msg)
+            except Exception:
+                pass
+
+        # منشی (فقط پیوی)
+        if db.get_setting(owner_id, "secretary_active") == "1" and event.is_private:
+            sec_msg = db.get_setting(owner_id, "secretary_message", "در حال حاضر در دسترس نیستم.")
+            try:
+                await event.reply(f"🤖 منشی خودکار:\n{sec_msg}")
+            except Exception:
+                pass
+            return
+
+        # ری‌اکشن خودکار
+        if db.get_setting(owner_id, "auto_reaction_active") == "1":
+            emoji = db.get_setting(owner_id, "auto_reaction_emoji", "❤️")
+            try:
+                from telethon.tl.functions.messages import SendReactionRequest
+                from telethon.tl.types import ReactionEmoji
+                await cl(SendReactionRequest(
+                    peer=chat_id, msg_id=msg.id,
+                    reaction=[ReactionEmoji(emoticon=emoji)],
+                ))
+            except Exception:
+                pass
+
+        # پاسخ به دشمن
+        if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
+            try:
+                await event.reply(random.choice(ENEMY_REPLIES))
+            except Exception:
+                pass
+
+        # ضد لینک (فقط پیوی)
+        if db.get_setting(owner_id, "anti_link_active") == "1" and event.is_private and LINK_PATTERN.search(text):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+        # ضد فحش
+        if any(w in text for w in BADWORDS):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    @cl.on(events.NewMessage(outgoing=True))
+    async def on_outgoing(event):
+        text = event.raw_text.strip()
+
+        # دستورات همیشه فعال
+        if text == "سلف روشن":
+            db.set_setting(owner_id, "self_bot_active", "1")
+            await _safe_edit(event, owner_id, "✅ سلف‌بات روشن شد.")
+            return
+        if text == "سلف خاموش":
+            db.set_setting(owner_id, "self_bot_active", "0")
+            await _safe_edit(event, owner_id, "❌ سلف‌بات خاموش شد.")
+            return
+
+        if db.get_setting(owner_id, "self_bot_active") != "1":
+            return
+
+        await _handle_command(cl, event, text, owner_id, entry)
+
+
+# ─── پردازش دستورات ────────────────────────────────────────────────────────────
+async def _handle_command(cl, event, text, owner_id, entry):
+    msg = event.message
+
+    def gs(key, default=None):
+        return db.get_setting(owner_id, key, default)
+
+    def ss(key, value):
+        db.set_setting(owner_id, key, value)
+
+    async def edit(t):
+        await _safe_edit(event, owner_id, t)
+
+    # ─── دشمن ────────────────────────────────────────────────────────────────
+    if text.startswith("تنظیم دشمن"):
+        target = await _resolve_target(event, text.split())
+        if target:
+            db.add_enemy(owner_id, target["id"], target.get("username"), target.get("name"))
+            await edit(f"🔴 {target.get('name', target['id'])} به لیست دشمن اضافه شد.")
+        else:
+            await edit("❗ روی پیام کاربر ریپلای کن یا آیدی عددی بنویس.")
+
+    elif text.startswith("حذف دشمن"):
+        target = await _resolve_target(event, text.split())
+        if target:
+            removed = db.remove_enemy(owner_id, target["id"])
+            await edit("✅ از لیست دشمن حذف شد." if removed else "❗ در لیست نبود.")
+        else:
+            await edit("❗ روی پیام کاربر ریپلای کن یا آیدی عددی بنویس.")
+
+    elif text == "نمایش لیست دشمن":
+        enemies = db.get_enemies(owner_id)
+        if not enemies:
+            await edit("📋 لیست دشمن خالی است.")
+        else:
+            lines = [f"🔴 لیست دشمن ({len(enemies)} نفر):\n"]
+            for e in enemies:
+                lines.append(f"• {e['name'] or e['username'] or e['user_id']} — `{e['user_id']}`")
+            await edit("\n".join(lines))
+
+    elif text == "پاک کردن لیست دشمن":
+        db.clear_enemies(owner_id)
+        await edit("🗑️ لیست دشمن پاک شد.")
+
+    # ─── دوست ────────────────────────────────────────────────────────────────
+    elif text.startswith("تنظیم دوست"):
+        target = await _resolve_target(event, text.split())
+        if target:
+            db.add_friend(owner_id, target["id"], target.get("username"), target.get("name"))
+            await edit(f"💚 {target.get('name', target['id'])} به لیست دوست اضافه شد.")
+        else:
+            await edit("❗ روی پیام کاربر ریپلای کن یا آیدی عددی بنویس.")
+
+    elif text.startswith("حذف دوست"):
+        target = await _resolve_target(event, text.split())
+        if target:
+            removed = db.remove_friend(owner_id, target["id"])
+            await edit("✅ از لیست دوست حذف شد." if removed else "❗ در لیست نبود.")
+        else:
+            await edit("❗ روی پیام کاربر ریپلای کن یا آیدی عددی بنویس.")
+
+    elif text == "نمایش لیست دوست":
+        friends = db.get_friends(owner_id)
+        if not friends:
+            await edit("📋 لیست دوست خالی است.")
+        else:
+            lines = [f"💚 لیست دوست ({len(friends)} نفر):\n"]
+            for f in friends:
+                lines.append(f"• {f['name'] or f['username'] or f['user_id']} — `{f['user_id']}`")
+            await edit("\n".join(lines))
+
+    elif text == "پاک کردن لیست دوست":
+        db.clear_friends(owner_id)
+        await edit("🗑️ لیست دوست پاک شد.")
+
+    # ─── منشی ────────────────────────────────────────────────────────────────
+    elif text == "منشی روشن":
+        ss("secretary_active", "1"); await edit("🤖 منشی خودکار روشن شد.")
+    elif text == "منشی خاموش":
+        ss("secretary_active", "0"); await edit("🤖 منشی خودکار خاموش شد.")
+    elif text.startswith("پیام منشی "):
+        ss("secretary_message", text[len("پیام منشی "):].strip())
+        await edit("✅ پیام منشی تنظیم شد.")
+
+    # ─── ضد حذف ──────────────────────────────────────────────────────────────
+    elif text == "ضد حذف روشن":
+        ss("anti_delete_active", "1"); await edit("🛡️ ضد حذف روشن شد.")
+    elif text == "ضد حذف خاموش":
+        ss("anti_delete_active", "0"); await edit("🛡️ ضد حذف خاموش شد.")
+
+    # ─── ضد لینک ─────────────────────────────────────────────────────────────
+    elif text == "ضد لینک روشن":
+        ss("anti_link_active", "1"); await edit("🔗 ضد لینک روشن شد.")
+    elif text == "ضد لینک خاموش":
+        ss("anti_link_active", "0"); await edit("🔗 ضد لینک خاموش شد.")
+
+    # ─── قفل پیوی ────────────────────────────────────────────────────────────
+    elif text == "قفل پیوی روشن":
+        ss("private_lock_active", "1"); await edit("🔒 قفل پیوی روشن شد.")
+    elif text == "قفل پیوی خاموش":
+        ss("private_lock_active", "0"); await edit("🔓 قفل پیوی خاموش شد.")
+
+    # ─── سین خودکار ──────────────────────────────────────────────────────────
+    elif text == "سین خودکار روشن":
+        ss("auto_seen_active", "1"); await edit("👁️ سین خودکار روشن شد.")
+    elif text == "سین خودکار خاموش":
+        ss("auto_seen_active", "0"); await edit("👁️ سین خودکار خاموش شد.")
+
+    # ─── ری‌اکشن ─────────────────────────────────────────────────────────────
+    elif text == "ری‌اکشن روشن":
+        ss("auto_reaction_active", "1"); await edit("❤️ ری‌اکشن خودکار روشن شد.")
+    elif text == "ری‌اکشن خاموش":
+        ss("auto_reaction_active", "0"); await edit("❤️ ری‌اکشن خودکار خاموش شد.")
+    elif text.startswith("ری‌اکشن "):
+        emoji = text[len("ری‌اکشن "):].strip()
+        ss("auto_reaction_emoji", emoji); await edit(f"✅ ری‌اکشن پیش‌فرض: {emoji}")
+
+    # ─── ذخیره مدیا ──────────────────────────────────────────────────────────
+    elif text == "ذخیره مدیا روشن":
+        os.makedirs(f"saved_media/{owner_id}", exist_ok=True)
+        ss("auto_save_media", "1"); await edit("💾 ذخیره خودکار مدیا روشن شد.")
+    elif text == "ذخیره مدیا خاموش":
+        ss("auto_save_media", "0"); await edit("💾 ذخیره خودکار مدیا خاموش شد.")
+
+    # ─── سیو کانال ───────────────────────────────────────────────────────────
+    elif text.startswith("سیو کانال "):
+        parts = text.split()
+        channel_input = parts[2] if len(parts) >= 3 else None
+        limit = int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() else 100
+        if not channel_input:
+            await edit("❗ فرمت: سیو کانال [لینک یا آیدی] [تعداد اختیاری]")
+        else:
+            await edit(f"⏳ در حال پردازش کانال، تا {limit} مدیا ذخیره می‌شود...")
+            asyncio.ensure_future(_save_channel_media(cl, channel_input, limit, owner_id))
+
+    elif text == "توقف سیو":
+        ss("channel_save_active", "0"); await edit("🛑 سیو کانال متوقف شد.")
+
+    # ─── سایلنت ──────────────────────────────────────────────────────────────
+    elif text == "سایلنت چت روشن":
+        chat = await event.get_chat()
+        db.add_silent_chat(owner_id, chat.id); await edit("🔇 این چت سایلنت شد.")
+    elif text == "سایلنت چت خاموش":
+        chat = await event.get_chat()
+        db.remove_silent_chat(owner_id, chat.id); await edit("🔔 سایلنت این چت برداشته شد.")
+    elif text.startswith("سایلنت کاربر "):
+        uid = int(text.split()[-1])
+        db.add_silent_user(owner_id, uid); await edit(f"🔇 کاربر {uid} سایلنت شد.")
+    elif text.startswith("لغو سایلنت کاربر "):
+        uid = int(text.split()[-1])
+        db.remove_silent_user(owner_id, uid); await edit(f"🔔 سایلنت کاربر {uid} برداشته شد.")
+
+    # ─── پاسخ دشمن ───────────────────────────────────────────────────────────
+    elif text == "پاسخ دشمن روشن":
+        ss("enemy_reply_active", "1"); await edit("⚔️ پاسخ خودکار به دشمن روشن شد.")
+    elif text == "پاسخ دشمن خاموش":
+        ss("enemy_reply_active", "0"); await edit("⚔️ پاسخ خودکار به دشمن خاموش شد.")
+
+    # ─── فونت ────────────────────────────────────────────────────────────────
+    elif text.startswith("فونت "):
+        font_id = text.split()[-1]
+        if font_id in FONTS:
+            ss("selected_font", font_id); await edit(f"🔤 فونت {font_id} انتخاب شد.")
+        else:
+            await edit("❗ شماره فونت باید بین ۰ تا ۸ باشد.")
+    elif text == "لیست فونت":
+        samples = {"0":"متن عادی","1":"𝗕𝗼𝗹𝗱","2":"𝘐𝘵𝘢𝘭𝘪𝘤","3":"𝙼𝚘𝚗𝚘","4":"Ｆｕｌｌ","5":"𝐒𝐞𝐫𝐢𝐟","6":"𝒮𝒸𝓇𝒾𝓅𝓉","7":"S̶t̶r̶i̶k̶e̶","8":"U̲n̲d̲e̲r̲"}
+        lines = ["📝 فونت‌های موجود:\n"] + [f"فونت {k} — {v}" for k, v in samples.items()]
+        await edit("\n".join(lines))
+
+    # ─── ساعت ────────────────────────────────────────────────────────────────
+    elif text == "ساعت نام روشن":
+        ss("clock_name_active", "1"); await edit("⏰ ساعت در نام روشن شد.")
+    elif text == "ساعت نام خاموش":
+        ss("clock_name_active", "0"); await edit("⏰ ساعت در نام خاموش شد.")
+    elif text == "ساعت بیو روشن":
+        ss("clock_bio_active", "1"); await edit("⏰ ساعت در بیو روشن شد.")
+    elif text == "ساعت بیو خاموش":
+        ss("clock_bio_active", "0"); await edit("⏰ ساعت در بیو خاموش شد.")
+
+    # ─── اسپم ────────────────────────────────────────────────────────────────
+    elif text.startswith("اسپم "):
+        parts = text.split(" ", 2)
+        if len(parts) >= 3 and parts[1].isdigit():
+            count = min(int(parts[1]), 50)
+            spam_text = parts[2]
+            ss("spam_active", "1")
+            await edit(f"💣 اسپم شروع شد — {count} بار")
+            chat = await event.get_chat()
+            asyncio.ensure_future(_do_spam(cl, owner_id, chat.id, spam_text, count))
+        else:
+            await edit("❗ فرمت: اسپم [تعداد] [متن]")
+    elif text == "توقف اسپم":
+        ss("spam_active", "0"); await edit("🛑 اسپم متوقف شد.")
+
+    # ─── حذف خودکار ──────────────────────────────────────────────────────────
+    elif text.startswith("حذف بعد "):
+        parts = text.split()
+        if len(parts) >= 3 and parts[2].isdigit():
+            secs = int(parts[2])
+            await edit(f"⏱️ پیام بعد از {secs} ثانیه حذف می‌شود.")
+            await asyncio.sleep(secs)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+    # ─── ذخیره پیام ──────────────────────────────────────────────────────────
+    elif text.startswith("ذخیره "):
+        parts = text.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            slot = int(parts[1])
+            if 1 <= slot <= 10:
+                replied = await event.get_reply_message()
+                if replied:
+                    db.save_message_slot(owner_id, slot, replied.text or "")
+                    await edit(f"💾 پیام در اسلات {slot} ذخیره شد.")
+                else:
+                    await edit("❗ روی پیام مورد نظر ریپلای کن.")
+            else:
+                await edit("❗ اسلات باید بین ۱ تا ۱۰ باشد.")
+
+    elif text.startswith("ارسال ذخیره "):
+        parts = text.split()
+        if len(parts) >= 3 and parts[2].isdigit():
+            slot = int(parts[2])
+            saved = db.get_message_slot(owner_id, slot)
+            if saved:
+                chat = await event.get_chat()
+                await cl.send_message(chat.id, saved["content"])
+                await msg.delete()
+            else:
+                await edit(f"❗ اسلات {slot} خالی است.")
+
+    # ─── ترجمه ───────────────────────────────────────────────────────────────
+    elif text.startswith("ترجمه "):
+        to_tr = text[len("ترجمه "):].strip()
+        if not to_tr:
+            replied = await event.get_reply_message()
+            if replied:
+                to_tr = replied.text or ""
+        if to_tr:
+            await edit(f"🌐 ترجمه:\n{await _translate(to_tr)}")
+        else:
+            await edit("❗ متن یا ریپلای لازم است.")
+
+    # ─── هواشناسی ────────────────────────────────────────────────────────────
+    elif text.startswith("هوا "):
+        await edit(await _get_weather(text[len("هوا "):].strip()))
+
+    # ─── قیمت ارز ────────────────────────────────────────────────────────────
+    elif text in ("قیمت دلار", "ارز"):
+        await edit(await _get_currency())
+
+    # ─── وضعیت ───────────────────────────────────────────────────────────────
+    elif text == "وضعیت":
+        status_map = {
+            "self_bot_active": "سلف‌بات", "secretary_active": "منشی",
+            "anti_delete_active": "ضد حذف", "anti_link_active": "ضد لینک",
+            "auto_seen_active": "سین خودکار", "auto_reaction_active": "ری‌اکشن",
+            "private_lock_active": "قفل پیوی", "enemy_reply_active": "پاسخ دشمن",
+            "auto_save_media": "ذخیره مدیا", "clock_name_active": "ساعت نام",
+            "clock_bio_active": "ساعت بیو",
+        }
+        lines = [f"📊 وضعیت {config.BOT_NAME} v{config.BOT_VERSION}\n"]
+        for key, label in status_map.items():
+            icon = "✅" if gs(key) == "1" else "❌"
+            lines.append(f"{icon} {label}")
+        lines.append(f"\n🔤 فونت: {gs('selected_font', '0')}")
+        lines.append(f"👥 دشمن: {len(db.get_enemies(owner_id))} نفر")
+        lines.append(f"💚 دوست: {len(db.get_friends(owner_id))} نفر")
+        await edit("\n".join(lines))
+
+    # ─── راهنما ───────────────────────────────────────────────────────────────
+    elif text in ("راهنما", "help"):
+        await edit(_help_text())
+
+    # ─── ارسال زمان‌بندی شده ─────────────────────────────────────────────────
+    elif text.startswith("ارسال زمان‌بندی "):
+        m = re.match(r"^ارسال زمان‌بندی (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (.+)$", text, re.DOTALL)
+        if m:
+            chat = await event.get_chat()
+            db.add_scheduled_message(owner_id, chat.id, m.group(2), m.group(1) + ":00")
+            await edit(f"📅 پیام در {m.group(1)} ارسال خواهد شد.")
+        else:
+            await edit("❗ فرمت: ارسال زمان‌بندی [YYYY-MM-DD HH:MM] متن")
+
+
+# ─── توابع کمکی ────────────────────────────────────────────────────────────────
+async def _safe_edit(event, owner_id, text):
     try:
-        replied = await event.get_reply_message()
-        if replied and replied.sender_id:
-            sender = await client.get_entity(replied.sender_id)
-            return sender
-    except Exception as e:
-        logger.warning(f"خطا در دریافت فرستنده: {e}")
-    return None
-
-
-async def save_media(message) -> str:
-    """ذخیره مدیا از پیام و بازگشت مسیر فایل"""
-    if not message.media:
-        return ""
-    try:
-        media_dir = Path("saved_media")
-        media_dir.mkdir(exist_ok=True)
-        path = await client.download_media(message, file=str(media_dir))
-        return str(path) if path else ""
-    except Exception as e:
-        logger.warning(f"خطا در ذخیره مدیا: {e}")
-        return ""
-
-
-async def send_temp(event, text: str, delay: int = 5):
-    """ارسال پیام موقت که بعد از چند ثانیه حذف می‌شود"""
-    try:
-        msg = await event.reply(text)
-        await asyncio.sleep(delay)
-        await msg.delete()
+        fn = FONTS.get(db.get_setting(owner_id, "selected_font", "0"), FONTS["0"])
+        await event.edit(fn(text))
+    except FloodWaitError as e:
+        await asyncio.sleep(e.seconds + 1)
     except Exception:
         pass
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  دیکشنری پیام‌های ورودی برای ضد حذف (قبل از حذف ذخیره می‌کنیم)
-# ════════════════════════════════════════════════════════════════════════════════
-_message_cache: dict[int, dict] = {}  # message_id -> {chat_id, sender_id, name, text, media}
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  هندلرها
-# ════════════════════════════════════════════════════════════════════════════════
-
-@client.on(events.NewMessage(outgoing=True))
-async def command_handler(event):
-    """هندلر اصلی دستورات — فقط پیام‌های خودِ کاربر"""
-    global spam_running
-
-    text = event.raw_text.strip()
-    me = await get_me()
-
-    # ── بررسی فعال بودن سلف (فقط دستور روشن کردن استثناء است) ───────────────
-    if text != "سلف روشن" and not is_self_active():
-        return
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات کنترل سلف
-    # ════════════════════════════════════════════════════════════════════════
-
-    if text == "سلف روشن":
-        db.set_setting("self_active", "true")
-        await send_temp(event, f"✅ {BOT_NAME} روشن شد!\n🕐 {now_str()}")
-
-    elif text == "سلف خاموش":
-        db.set_setting("self_active", "false")
-        await send_temp(event, f"🔴 {BOT_NAME} خاموش شد.\n🕐 {now_str()}")
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات منشی
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "منشی روشن":
-        db.set_setting("secretary_active", "true")
-        await send_temp(event, SYSTEM_MSGS["secretary_on"])
-
-    elif text == "منشی خاموش":
-        db.set_setting("secretary_active", "false")
-        await send_temp(event, SYSTEM_MSGS["secretary_off"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات ضد حذف
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "ضد حذف روشن":
-        db.set_setting("anti_delete_active", "true")
-        await send_temp(event, SYSTEM_MSGS["anti_delete_on"])
-
-    elif text == "ضد حذف خاموش":
-        db.set_setting("anti_delete_active", "false")
-        await send_temp(event, SYSTEM_MSGS["anti_delete_off"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات قفل پیوی
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "قفل پیوی روشن":
-        db.set_setting("pv_lock_active", "true")
-        await send_temp(event, SYSTEM_MSGS["pv_lock_on"])
-
-    elif text == "قفل پیوی خاموش":
-        db.set_setting("pv_lock_active", "false")
-        await send_temp(event, SYSTEM_MSGS["pv_lock_off"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات ضد لینک
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "ضد لینک روشن":
-        db.set_setting("anti_link_active", "true")
-        await send_temp(event, SYSTEM_MSGS["anti_link_on"])
-
-    elif text == "ضد لینک خاموش":
-        db.set_setting("anti_link_active", "false")
-        await send_temp(event, SYSTEM_MSGS["anti_link_off"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات دوست
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "تنظیم دوست":
-        sender = await get_reply_sender(event)
-        if not sender:
-            await send_temp(event, SYSTEM_MSGS["not_found"])
-            return
-        name = getattr(sender, "first_name", "") or ""
-        username = getattr(sender, "username", "") or ""
-        db.add_friend(sender.id, username, name)
-        await send_temp(event, f"{SYSTEM_MSGS['friend_added']}\n👤 {name} (@{username})")
-
-    elif text == "حذف دوست":
-        sender = await get_reply_sender(event)
-        if not sender:
-            await send_temp(event, SYSTEM_MSGS["not_found"])
-            return
-        db.remove_friend(sender.id)
-        name = getattr(sender, "first_name", "") or str(sender.id)
-        await send_temp(event, f"{SYSTEM_MSGS['friend_removed']}\n👤 {name}")
-
-    elif text == "نمایش لیست دوست":
-        friends = db.get_all_friends()
-        if not friends:
-            await send_temp(event, "📋 لیست دوستان خالی است.", delay=8)
-            return
-        lines = [f"💚 لیست دوستان ({len(friends)} نفر):\n"]
-        for i, f in enumerate(friends, 1):
-            uname = f"@{f['username']}" if f["username"] else "—"
-            lines.append(f"{i}. {f['name']} | {uname} | آی‌دی: {f['user_id']}")
-        await send_temp(event, "\n".join(lines), delay=15)
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دستورات دشمن
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "تنظیم دشمن":
-        sender = await get_reply_sender(event)
-        if not sender:
-            await send_temp(event, SYSTEM_MSGS["not_found"])
-            return
-        name = getattr(sender, "first_name", "") or ""
-        username = getattr(sender, "username", "") or ""
-        db.add_enemy(sender.id, username, name)
-        await send_temp(event, f"{SYSTEM_MSGS['enemy_added']}\n👤 {name} (@{username})")
-
-    elif text == "حذف دشمن":
-        sender = await get_reply_sender(event)
-        if not sender:
-            await send_temp(event, SYSTEM_MSGS["not_found"])
-            return
-        db.remove_enemy(sender.id)
-        name = getattr(sender, "first_name", "") or str(sender.id)
-        await send_temp(event, f"{SYSTEM_MSGS['enemy_removed']}\n👤 {name}")
-
-    elif text == "نمایش لیست دشمن":
-        enemies = db.get_all_enemies()
-        if not enemies:
-            await send_temp(event, "📋 لیست دشمنان خالی است.", delay=8)
-            return
-        lines = [f"🔴 لیست دشمنان ({len(enemies)} نفر):\n"]
-        for i, e in enumerate(enemies, 1):
-            uname = f"@{e['username']}" if e["username"] else "—"
-            lines.append(f"{i}. {e['name']} | {uname} | آی‌دی: {e['user_id']}")
-        await send_temp(event, "\n".join(lines), delay=15)
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  ذخیره پیام در اسلات: ذخیره N (روی پیام ریپلای کن)
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text.startswith("ذخیره "):
-        parts = text.split()
-        if len(parts) == 2 and parts[1].isdigit():
-            slot = int(parts[1])
-            if 1 <= slot <= MAX_MESSAGE_SLOTS:
-                if event.reply_to_msg_id:
-                    replied = await event.get_reply_message()
-                    content = replied.raw_text if replied else ""
-                    db.save_message_slot(slot, content)
-                    await send_temp(event, f"{SYSTEM_MSGS['slot_saved']} (اسلات {slot})")
-                else:
-                    await send_temp(event, "❌ روی پیامی که می‌خوای ذخیره کنی ریپلای کن.")
-
-    elif text.startswith("ارسال "):
-        parts = text.split()
-        if len(parts) == 2 and parts[1].isdigit():
-            slot = int(parts[1])
-            content = db.get_message_slot(slot)
-            if content:
-                await event.delete()
-                await client.send_message(event.chat_id, content)
-            else:
-                await send_temp(event, SYSTEM_MSGS["slot_empty"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  اسپم: اسپم N متن
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text.startswith("اسپم "):
-        parts = text.split(" ", 2)
-        if len(parts) >= 3:
-            try:
-                count = int(parts[1])
-                msg_text = parts[2]
-                spam_running = True
-                await event.delete()
-                for i in range(count):
-                    if not spam_running:
-                        break
-                    await client.send_message(event.chat_id, msg_text)
-                    await asyncio.sleep(SPAM_DELAY)
-            except ValueError:
-                await send_temp(event, "❌ فرمت درست: اسپم [تعداد] [متن]")
-
-    elif text == "توقف اسپم":
-        spam_running = False
-        await send_temp(event, SYSTEM_MSGS["spam_stopped"])
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  وضعیت سیستم
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "وضعیت":
-        settings = db.get_all_settings()
-        status_icon = lambda s: "✅" if s == "true" else "🔴"
-        status_text = (
-            f"📊 وضعیت {BOT_NAME}\n"
-            f"🕐 {now_str()}\n\n"
-            f"{status_icon(settings.get('self_active','false'))} سلف‌بات\n"
-            f"{status_icon(settings.get('secretary_active','false'))} منشی\n"
-            f"{status_icon(settings.get('anti_delete_active','false'))} ضد حذف\n"
-            f"{status_icon(settings.get('pv_lock_active','false'))} قفل پیوی\n"
-            f"{status_icon(settings.get('anti_link_active','false'))} ضد لینک\n"
-            f"{status_icon(settings.get('auto_seen_active','false'))} دیدن خودکار\n"
-            f"{status_icon(settings.get('auto_reaction_active','false'))} واکنش خودکار\n\n"
-            f"👥 دوستان: {len(db.get_all_friends())} نفر\n"
-            f"⚔️ دشمنان: {len(db.get_all_enemies())} نفر"
-        )
-        await send_temp(event, status_text, delay=20)
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  مشاهده آخرین حذف‌شده‌ها
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "حذف‌شده‌ها":
-        deleted = db.get_recent_deleted(event.chat_id, limit=5)
-        if not deleted:
-            await send_temp(event, "🗑️ پیام حذف‌شده‌ای یافت نشد.")
-            return
-        lines = ["🗑️ آخرین پیام‌های حذف‌شده:\n"]
-        for d in deleted:
-            lines.append(
-                f"👤 {d['sender_name']} | 🕐 {d['deleted_at']}\n"
-                f"💬 {d['text'][:100] or '[مدیا]'}\n"
-            )
-        await send_temp(event, "\n".join(lines), delay=20)
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  دیدن خودکار
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "دیدن خودکار روشن":
-        db.set_setting("auto_seen_active", "true")
-        await send_temp(event, "✅ دیدن خودکار فعال شد.")
-
-    elif text == "دیدن خودکار خاموش":
-        db.set_setting("auto_seen_active", "false")
-        await send_temp(event, "🔴 دیدن خودکار غیرفعال شد.")
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  واکنش خودکار
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "واکنش خودکار روشن":
-        db.set_setting("auto_reaction_active", "true")
-        await send_temp(event, "✅ واکنش خودکار فعال شد.")
-
-    elif text == "واکنش خودکار خاموش":
-        db.set_setting("auto_reaction_active", "false")
-        await send_temp(event, "🔴 واکنش خودکار غیرفعال شد.")
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  راهنما
-    # ════════════════════════════════════════════════════════════════════════
-
-    elif text == "راهنما":
-        help_text = (
-            f"📖 راهنمای {BOT_NAME}\n\n"
-            "🔵 کنترل سلف:\n"
-            "سلف روشن / سلف خاموش\n\n"
-            "👥 دوستان و دشمنان:\n"
-            "تنظیم دوست / حذف دوست\n"
-            "تنظیم دشمن / حذف دشمن\n"
-            "نمایش لیست دوست / نمایش لیست دشمن\n\n"
-            "🤖 اتوماسیون:\n"
-            "منشی روشن / خاموش\n"
-            "ضد حذف روشن / خاموش\n"
-            "قفل پیوی روشن / خاموش\n"
-            "ضد لینک روشن / خاموش\n"
-            "دیدن خودکار روشن / خاموش\n"
-            "واکنش خودکار روشن / خاموش\n\n"
-            "💾 مدیریت پیام:\n"
-            "ذخیره [1-10] (روی پیام ریپلای)\n"
-            "ارسال [1-10]\n\n"
-            "🚀 اسپم:\n"
-            "اسپم [تعداد] [متن]\n"
-            "توقف اسپم\n\n"
-            "📊 وضعیت / حذف‌شده‌ها / راهنما"
-        )
-        await send_temp(event, help_text, delay=30)
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  هندلر پیام‌های دریافتی (از دیگران)
-# ════════════════════════════════════════════════════════════════════════════════
-
-@client.on(events.NewMessage(incoming=True))
-async def incoming_handler(event):
-    """هندلر پیام‌های ورودی"""
-    if not is_self_active():
-        return
-
-    me = await get_me()
-    sender_id = event.sender_id
-    if sender_id is None or sender_id == me.id:
-        return
-
-    # ── کش پیام برای ضد حذف ──────────────────────────────────────────────────
-    if is_anti_delete_active():
-        try:
-            sender = await event.get_sender()
-            sender_name = getattr(sender, "first_name", "") or str(sender_id)
-            media_path = await save_media(event.message) if event.message.media else ""
-            _message_cache[event.message.id] = {
-                "chat_id": event.chat_id,
-                "sender_id": sender_id,
-                "sender_name": sender_name,
-                "text": event.raw_text or "",
-                "media_path": media_path,
+async def _resolve_target(event, parts):
+    replied = await event.get_reply_message()
+    if replied:
+        sender = await replied.get_sender()
+        if sender:
+            return {
+                "id": sender.id,
+                "username": getattr(sender, "username", None),
+                "name": getattr(sender, "first_name", str(sender.id)),
             }
-        except Exception as e:
-            logger.warning(f"خطا در کش پیام: {e}")
+    for p in parts[1:]:
+        if p.lstrip("-").isdigit():
+            return {"id": int(p), "username": None, "name": p}
+    return None
 
-    # ── دیدن خودکار ───────────────────────────────────────────────────────────
-    if is_auto_seen_active():
+
+async def _do_spam(cl, owner_id, chat_id, text, count):
+    delay = float(db.get_setting(owner_id, "spam_delay", "2"))
+    for _ in range(count):
+        if db.get_setting(owner_id, "spam_active") != "1":
+            break
         try:
-            await client.send_read_acknowledge(event.chat_id, event.message)
-        except Exception:
-            pass
-
-    # ── بررسی دوست (همه چیز رد می‌شه) ───────────────────────────────────────
-    if db.is_friend(sender_id):
-        return
-
-    is_private = isinstance(event.peer_id, PeerUser)
-
-    # ── واکنش خودکار ──────────────────────────────────────────────────────────
-    if is_auto_reaction_active() and is_private:
-        try:
-            reaction = db.get_setting("default_reaction", "👍")
-            await client(
-                __import__("telethon.tl.functions.messages", fromlist=["SendReactionRequest"])
-                .SendReactionRequest(
-                    peer=event.chat_id,
-                    msg_id=event.message.id,
-                    reaction=[__import__("telethon.tl.types", fromlist=["ReactionEmoji"])
-                               .ReactionEmoji(emoticon=reaction)]
-                )
-            )
-        except Exception:
-            pass
-
-    # ── ضد لینک (فقط در پیوی) ─────────────────────────────────────────────────
-    if is_anti_link_active() and is_private:
-        if contains_link(event.raw_text):
-            try:
-                await event.delete()
-                notify = await client.send_message(
-                    event.chat_id,
-                    "🚫 ارسال لینک در این چت مجاز نیست."
-                )
-                await asyncio.sleep(5)
-                await notify.delete()
-            except Exception as e:
-                logger.warning(f"خطا در ضد لینک: {e}")
-            return
-
-    # ── پاسخ به دشمن ──────────────────────────────────────────────────────────
-    if db.is_enemy(sender_id):
-        try:
-            reply_text = get_enemy_reply()
-            await event.reply(reply_text)
+            await cl.send_message(chat_id, text)
+            await asyncio.sleep(delay)
         except FloodWaitError as e:
-            logger.warning(f"FloodWait: {e.seconds} ثانیه")
-            await asyncio.sleep(e.seconds)
-        except Exception as e:
-            logger.warning(f"خطا در پاسخ به دشمن: {e}")
-        return
+            await asyncio.sleep(e.seconds + 1)
+        except Exception:
+            break
+    db.set_setting(owner_id, "spam_active", "0")
 
-    # ── قفل پیوی ──────────────────────────────────────────────────────────────
-    if is_pv_lock_active() and is_private:
+
+async def _save_channel_media(cl, channel_input, limit, owner_id):
+    db.set_setting(owner_id, "channel_save_active", "1")
+    media_dir = f"saved_media/{owner_id}"
+    os.makedirs(media_dir, exist_ok=True)
+    try:
+        me = await cl.get_me()
+        if channel_input.startswith("https://t.me/"):
+            channel_input = channel_input.replace("https://t.me/", "")
+        if channel_input.startswith("@"):
+            channel_input = channel_input[1:]
+
+        saved = skipped = 0
+        async for msg in cl.iter_messages(channel_input, limit=limit):
+            if db.get_setting(owner_id, "channel_save_active") != "1":
+                break
+            if msg.media:
+                try:
+                    path = await cl.download_media(msg, file=media_dir + "/")
+                    if path:
+                        caption = f"📥 سیو کانال\n📌 پیام #{msg.id}"
+                        if msg.text:
+                            caption += f"\n📝 {msg.text[:100]}"
+                        await cl.send_file(me.id, path, caption=caption)
+                        saved += 1
+                        await asyncio.sleep(1.5)
+                except FloodWaitError as e:
+                    await asyncio.sleep(e.seconds + 2)
+                except Exception:
+                    skipped += 1
+            else:
+                skipped += 1
+
+        db.set_setting(owner_id, "channel_save_active", "0")
+        await cl.send_message(me.id,
+            f"✅ سیو کانال تموم شد\n💾 ذخیره شد: {saved}\n⏭ رد شد: {skipped}")
+    except Exception as e:
+        db.set_setting(owner_id, "channel_save_active", "0")
         try:
-            await event.delete()
+            me = await cl.get_me()
+            await cl.send_message(me.id, f"❌ خطا در سیو کانال: {e}")
         except Exception:
             pass
-        return
 
-    # ── منشی ──────────────────────────────────────────────────────────────────
-    if is_secretary_active() and is_private:
+
+async def _translate(text):
+    try:
+        import urllib.request, urllib.parse, json
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fa&dt=t&q={urllib.parse.quote(text)}"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            return data[0][0][0]
+    except Exception:
+        return "⚠️ خطا در ترجمه"
+
+
+async def _get_weather(city):
+    try:
+        import urllib.request, urllib.parse, json
+        api_key = config.WEATHER_API_KEY
+        if not api_key:
+            return "⚠️ کلید API هواشناسی تنظیم نشده."
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={urllib.parse.quote(city)}&appid={api_key}&units=metric&lang=fa"
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            return (f"🌤️ هوای {city}:\n"
+                    f"وضعیت: {data['weather'][0]['description']}\n"
+                    f"دما: {data['main']['temp']}°C\n"
+                    f"رطوبت: {data['main']['humidity']}%")
+    except Exception:
+        return "⚠️ خطا در دریافت اطلاعات هوا"
+
+
+async def _get_currency():
+    try:
+        import urllib.request, json
+        with urllib.request.urlopen("https://api.exchangerate-api.com/v4/latest/USD", timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            r = data["rates"]
+            return (f"💵 نرخ ارز:\n"
+                    f"دلار/یورو: {round(1/r['EUR'],4)}\n"
+                    f"دلار/پوند: {round(1/r['GBP'],4)}\n"
+                    f"دلار/روبل: {round(r['RUB'],2)}")
+    except Exception:
+        return "⚠️ خطا در دریافت قیمت ارز"
+
+
+def _help_text():
+    return """📖 راهنمای AMEL SELF55
+
+🔹 اصلی:
+• سلف روشن / سلف خاموش
+• وضعیت
+
+🔹 لیست‌ها:
+• تنظیم دشمن / حذف دشمن [ریپلای یا آیدی]
+• نمایش لیست دشمن / پاک کردن لیست دشمن
+• تنظیم دوست / حذف دوست
+• نمایش لیست دوست / پاک کردن لیست دوست
+
+🔹 منشی:
+• منشی روشن / خاموش
+• پیام منشی [متن]
+
+🔹 امنیت:
+• ضد حذف روشن / خاموش
+• ضد لینک روشن / خاموش
+• قفل پیوی روشن / خاموش
+• پاسخ دشمن روشن / خاموش
+
+🔹 اتوماسیون:
+• سین خودکار روشن / خاموش
+• ری‌اکشن روشن / خاموش / [ایموجی]
+• ذخیره مدیا روشن / خاموش
+• ساعت نام روشن / خاموش
+• ساعت بیو روشن / خاموش
+
+🔹 ابزار:
+• ترجمه [متن]
+• هوا [شهر]
+• ارز
+
+🔹 اسپم:
+• اسپم [تعداد] [متن]
+• توقف اسپم
+
+🔹 پیام:
+• ذخیره [1-10] — ریپلای
+• ارسال ذخیره [1-10]
+• حذف بعد [ثانیه]
+• ارسال زمان‌بندی [YYYY-MM-DD HH:MM] متن
+
+🔹 سیو مدیا:
+• سیو کانال [@یوزرنیم یا لینک] [تعداد]
+• توقف سیو
+"""
+
+
+# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────
+async def _clock_loop(cl, owner_id):
+    while True:
         try:
-            sec_msg = db.get_setting("secretary_message", SECRETARY_DEFAULT)
-            await event.reply(sec_msg)
-        except FloodWaitError as e:
-            await asyncio.sleep(e.seconds)
-        except Exception as e:
-            logger.warning(f"خطا در منشی: {e}")
+            if db.get_setting(owner_id, "clock_name_active") == "1":
+                await cl(UpdateProfileRequest(last_name=persian_time()[:64]))
+            if db.get_setting(owner_id, "clock_bio_active") == "1":
+                await cl(UpdateProfileRequest(about=f"آخرین به‌روزرسانی: {persian_time()}"[:70]))
+        except Exception:
+            pass
+        await asyncio.sleep(60)
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  هندلر حذف پیام (ضد حذف)
-# ════════════════════════════════════════════════════════════════════════════════
-
-@client.on(events.MessageDeleted())
-async def deleted_handler(event):
-    """ضد حذف — ذخیره پیام‌های حذف‌شده"""
-    if not is_self_active() or not is_anti_delete_active():
-        return
-
-    for msg_id in event.deleted_ids:
-        cached = _message_cache.pop(msg_id, None)
-        if cached:
-            db.save_deleted_message(
-                chat_id=cached["chat_id"],
-                message_id=msg_id,
-                sender_id=cached["sender_id"],
-                sender_name=cached["sender_name"],
-                text=cached["text"],
-                media_path=cached.get("media_path", ""),
-            )
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  راه‌اندازی
-# ════════════════════════════════════════════════════════════════════════════════
-
-async def start_bot():
-    """شروع ربات"""
-    db.init_db()
-    logger.info(f"🚀 {BOT_NAME} در حال راه‌اندازی...")
-
-    if not API_ID or not API_HASH:
-        logger.error("❌ API_ID یا API_HASH تنظیم نشده است!")
-        return
-
-    await client.start(phone=lambda: input("📱 شماره تلفن: "))
-    me = await client.get_me()
-    logger.info(f"✅ وارد شد: {me.first_name} | @{me.username or 'بدون یوزرنیم'}")
-    logger.info(f"🤖 {BOT_NAME} فعال شد!")
-
-    await client.run_until_disconnected()
-
-
-if __name__ == "__main__":
-    asyncio.run(start_bot())
+async def _scheduler_loop(cl, owner_id):
+    while True:
+        try:
+            for p in db.get_pending_scheduled(owner_id):
+                try:
+                    await cl.send_message(p["chat_id"], p["message"])
+                    db.mark_scheduled_sent(p["id"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        await asyncio.sleep(30)
