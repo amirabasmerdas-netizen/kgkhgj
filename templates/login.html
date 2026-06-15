@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ bot_name }} — ورود</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="login-body">
+
+<div class="login-wrap">
+  <div class="login-card">
+
+    <div class="login-logo">
+      <span class="big-icon">🤖</span>
+      <h1>{{ bot_name }}</h1>
+      <p class="sub">سلف‌بات حرفه‌ای فارسی</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- ── مرحله ۱: شماره تلفن ── -->
+    {% if step == 'phone' %}
+    <div class="step-indicator">
+      <span class="step active">۱</span>
+      <span class="step-line"></span>
+      <span class="step">۲</span>
+      <span class="step-line"></span>
+      <span class="step">۳</span>
+    </div>
+    <p class="step-label">شماره تلفن خود را وارد کنید</p>
+    <form method="post">
+      <div class="form-group">
+        <label>📱 شماره تلفن (با کد کشور)</label>
+        <input type="text" name="phone" placeholder="+989123456789"
+               class="input-field" autocomplete="tel" dir="ltr" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">
+        ارسال کد تأیید 📨
+      </button>
+    </form>
+    {% endif %}
+
+    <!-- ── مرحله ۲: کد تأیید ── -->
+    {% if step == 'code' %}
+    <div class="step-indicator">
+      <span class="step done">✓</span>
+      <span class="step-line active"></span>
+      <span class="step active">۲</span>
+      <span class="step-line"></span>
+      <span class="step">۳</span>
+    </div>
+    <p class="step-label">کد تأیید ارسال‌شده را وارد کنید</p>
+    <form method="post">
+      <div class="form-group">
+        <label>🔢 کد تأیید</label>
+        <input type="text" name="code" placeholder="12345"
+               class="input-field" autocomplete="one-time-code"
+               dir="ltr" maxlength="6" required autofocus>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">
+        تأیید کد ✅
+      </button>
+    </form>
+    <a href="/login" class="back-link">← بازگشت</a>
+    {% endif %}
+
+    <!-- ── مرحله ۳: رمز دو مرحله‌ای ── -->
+    {% if step == '2fa' %}
+    <div class="step-indicator">
+      <span class="step done">✓</span>
+      <span class="step-line active"></span>
+      <span class="step done">✓</span>
+      <span class="step-line active"></span>
+      <span class="step active">۳</span>
+    </div>
+    <p class="step-label">رمز دو مرحله‌ای را وارد کنید</p>
+    <form method="post">
+      <div class="form-group">
+        <label>🔒 رمز عبور</label>
+        <input type="password" name="password" placeholder="رمز عبور"
+               class="input-field" required autofocus>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">
+        ورود 🚀
+      </button>
+    </form>
+    {% endif %}
+
+  </div>
+</div>
+
+</body>
+</html>
