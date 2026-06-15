@@ -1,38 +1,35 @@
 """
-AMEL SELF55 - پیکربندی
-تنظیمات و متغیرهای محیطی پروژه
+AMEL SELF55 v2 — پیکربندی
 """
-
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── اطلاعات API تلگرام ──────────────────────────────────────────────────────
-API_ID = int(os.environ.get("API_ID", 0))
+# ── API تلگرام ────────────────────────────────────────────────────────────────
+API_ID   = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
-PHONE_NUMBER = os.environ.get("PHONE_NUMBER", "")
 
-# ── تنظیمات فلسک ─────────────────────────────────────────────────────────────
-PORT = int(os.environ.get("PORT", 5000))
-SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_secret_key_change_me")
-FLASK_DEBUG = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
+# ── مالک (برای استفاده رایگان بدون توکن) ─────────────────────────────────────
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", 0))   # آی‌دی عددی تلگرام
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "")        # مثال: +989123456789
 
-# ── مسیر پایگاه داده ─────────────────────────────────────────────────────────
+# ── سیستم توکن (اگه نمی‌خوای خالی بذار) ──────────────────────────────────────
+BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
+TOKENS_PER_SESSION = int(os.environ.get("TOKENS_PER_SESSION", 0))
+SESSION_HOURS    = int(os.environ.get("SESSION_HOURS", 24))
+
+# ── فلسک ─────────────────────────────────────────────────────────────────────
+PORT       = int(os.environ.get("PORT", 5000))
+SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_change_me")
+
+# ── پایگاه داده ───────────────────────────────────────────────────────────────
 DB_PATH = os.environ.get("DB_PATH", "amel_self55.db")
 
-# ── نام سشن ───────────────────────────────────────────────────────────────────
-SESSION_NAME = "amel_session"
+# ── هواشناسی (رایگان از openweathermap.org) ───────────────────────────────────
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
-# ── منطقه زمانی ───────────────────────────────────────────────────────────────
-TIMEZONE = "Asia/Tehran"
-
-# ── تاخیر اسپم (ثانیه) ───────────────────────────────────────────────────────
-SPAM_DELAY = float(os.environ.get("SPAM_DELAY", 1.5))
-
-# ── حداکثر اسلات ذخیره پیام ──────────────────────────────────────────────────
-MAX_MESSAGE_SLOTS = 10
-
-# ── نسخه ربات ────────────────────────────────────────────────────────────────
-VERSION = "1.0.0"
-BOT_NAME = "AMEL SELF55"
+# ── اطلاعات ربات ──────────────────────────────────────────────────────────────
+BOT_NAME    = "AMEL SELF55"
+BOT_VERSION = "2.0"
+TIMEZONE    = "Asia/Tehran"
