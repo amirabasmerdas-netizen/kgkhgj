@@ -30,7 +30,14 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
+# ─── چنل‌های اجباری ─────────────────────────────────────────────────
+c.execute("""
+    CREATE TABLE IF NOT EXISTS forced_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
     # افزودن ستون telegram_user_id اگر قبلاً نبوده (برای دیتابیس‌های قدیمی)
     try:
         c.execute("ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER")
@@ -734,3 +741,63 @@ def mark_scheduled_sent(msg_id: int):
     c.execute("UPDATE scheduled_messages SET sent = 1 WHERE id = ?", (msg_id,))
     conn.commit()
     conn.close()
+
+# ─── توابع چنل‌های اجباری ─────────────────────────────────────────────────
+def get_forced_channels():
+    """لیست همه چنل‌های اجباری را برمی‌گرداند"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT username FROM forced_channels ORDER BY added_at DESC")
+    rows = [r["username"] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def add_forced_channel(username: str) -> bool:
+    """یک چنل به لیست اجباری اضافه می‌کند"""
+    if not username.startswith("@"):
+        username = "@" + username
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO forced_channels (username) VALUES (?)", (username,))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def remove_forced_channel(username: str) -> bool:
+    """یک چنل را از لیست اجباری حذف می‌کند"""
+    if not username.startswith("@"):
+        username = "@" + username
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM forced_channels WHERE username = ?", (username,))
+    conn.commit()
+    affected = c.rowcount
+    conn.close()
+    return affected > 0
+
+
+def check_user_membership(bot, user_id: int) -> tuple:
+    """
+    بررسی می‌کند آیا کاربر در همه چنل‌های اجباری عضو است.
+    برمی‌گرداند: (is_member: bool, missing_channels: list)
+    """
+    channels = get_forced_channels()
+    if not channels:
+        return True, []
+    
+    missing = []
+    for ch in channels:
+        try:
+            member = bot.get_chat_member(ch, user_id)
+            if member.status not in ['member', 'administrator', 'creator']:
+                missing.append(ch)
+        except Exception:
+            missing.append(ch)
+    
+    return len(missing) == 0, missing
