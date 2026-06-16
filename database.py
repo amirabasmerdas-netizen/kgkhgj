@@ -30,14 +30,16 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-# ─── چنل‌های اجباری ─────────────────────────────────────────────────
-c.execute("""
-    CREATE TABLE IF NOT EXISTS forced_channels (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-""")
+
+    # ─── چنل‌های اجباری ─────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS forced_channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # افزودن ستون telegram_user_id اگر قبلاً نبوده (برای دیتابیس‌های قدیمی)
     try:
         c.execute("ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER")
@@ -741,6 +743,7 @@ def mark_scheduled_sent(msg_id: int):
     c.execute("UPDATE scheduled_messages SET sent = 1 WHERE id = ?", (msg_id,))
     conn.commit()
     conn.close()
+
 
 # ─── توابع چنل‌های اجباری ─────────────────────────────────────────────────
 def get_forced_channels():
