@@ -10,7 +10,7 @@ from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.errors import FloodWaitError
 import database as db
 import config
-from texts import ENEMY_REPLIES
+from texts import ENEMY_REPLIES, FRIEND_REPLIES  
 
 # ─── فونت‌ها ───────────────────────────────────────────────────────────────────
 FONTS = {
@@ -258,7 +258,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         if db.get_setting(owner_id, "secretary_active") == "1" and event.is_private:
             sec_msg = db.get_setting(owner_id, "secretary_message", "در حال حاضر در دسترس نیستم.")
             try:
-                await event.reply(f"🤖 منشی خودکار:\n{sec_msg}")
+                await event.reply(f":\n{sec_msg}")
             except Exception:
                 pass
             return
@@ -290,13 +290,25 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             except Exception:
                 pass
 
-        # ضد فحش
-        if any(w in text for w in BADWORDS):
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+        # ... (کدهای قبلی مثل ذخیره مدیا و سین خودکار و منشی و ری‌اکشن) ...
 
+    # ✅ پاسخ خودکار محبت‌آمیز به دوستان (فقط در پیوی)
+    if event.is_private and db.is_friend(owner_id, sender_id):
+        try:
+            await event.reply(random.choice(FRIEND_REPLIES))
+        except Exception:
+            pass
+
+    # ✅ قفل پیوی (حذف پیام ورودی در پیوی)
+    # ⚠️ نکته فنی مهم: تلگرام به اکانت‌های معمولی اجازه حذف "دوطرفه" پیام ورودی دیگران را نمی‌دهد.
+    # این کد پیام را از سمت اکانت شما (سلف) پاک می‌کند که بهترین حالت ممکن در API تلگرام است.
+    if db.get_setting(owner_id, "private_lock_active") == "1" and event.is_private:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+    # ❌ (بخش ضد فحش که قبلاً اینجا بود کاملاً حذف شد)
     @cl.on(events.NewMessage(outgoing=True))
     async def on_outgoing(event):
         text = event.raw_text.strip()
