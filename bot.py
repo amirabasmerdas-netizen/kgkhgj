@@ -29,7 +29,6 @@ _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 LINK_PATTERN = re.compile(
     r"(https?://\S+|t\.me/\S+|telegram\.me/\S+|www\.\S+)", re.IGNORECASE
 )
-BADWORDS = ["فحش", "بد", "کثیف", "احمق", "گاو", "خر", "مرتیکه"]
 
 
 def _convert_font(text, chars):
@@ -57,9 +56,8 @@ def persian_time():
 # ─── BotManager: مدیریت چندین کلاینت همزمان ────────────────────────────────────
 class BotManager:
     def __init__(self):
-        # {owner_id: {"client": TelegramClient, "task": asyncio.Task, "stop": bool}}
         self._bots = {}
-        self._timers = {}  # {owner_id: threading.Timer}
+        self._timers = {}
 
     def is_running(self, owner_id: int) -> bool:
         entry = self._bots.get(owner_id)
@@ -86,11 +84,9 @@ class BotManager:
         if self.is_running(owner_id):
             self.stop(owner_id)
 
-        # تشخیص مالک (رایگان، بدون توکن و بدون تایمر)
         tg_id = db.get_telegram_id_by_owner(owner_id)
         is_owner = (tg_id is not None and tg_id == config.OWNER_TG_ID)
 
-        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True و مالک نباشد)
         tokens_deducted = 0
         if config.BOT_TOKEN and check_tokens and not is_owner:
             balance = db.get_token_balance(owner_id)
@@ -107,7 +103,6 @@ class BotManager:
         )
         entry["task"] = task
 
-        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت (فقط برای غیر مالک)
         if config.BOT_TOKEN and not is_owner:
             self._cancel_timer(owner_id)
             timer = threading.Timer(
@@ -159,10 +154,8 @@ class BotManager:
                 me = await cl.get_me()
                 print(f"✅ [{owner_id}] بات راه‌اندازی شد — {me.first_name} (@{me.username})")
 
-                # ذخیره telegram_user_id — برای تشخیص مالک
                 db.save_telegram_user_id(owner_id, me.id)
 
-                # تشخیص مالک: از طریق ID یا شماره تلفن
                 me_phone = (me.phone or "").lstrip("+")
                 owner_phone = getattr(config, "OWNER_PHONE", "").lstrip("+")
                 is_now_owner = (
@@ -173,7 +166,6 @@ class BotManager:
                 if is_now_owner:
                     entry["is_owner"] = True
                     self._cancel_timer(owner_id)
-                    # فقط یک بار توکن برگشت داده می‌شود
                     if not entry.get("owner_refunded") and entry.get("tokens_deducted", 0) > 0:
                         db.add_tokens(owner_id, entry["tokens_deducted"])
                         entry["owner_refunded"] = True
@@ -204,7 +196,6 @@ class BotManager:
         print(f"🛑 [{owner_id}] بات متوقف شد.")
 
 
-# نمونه مشترک
 bot_manager = BotManager()
 
 
@@ -258,7 +249,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         if db.get_setting(owner_id, "secretary_active") == "1" and event.is_private:
             sec_msg = db.get_setting(owner_id, "secretary_message", "در حال حاضر در دسترس نیستم.")
             try:
-                await event.reply(f":\n{sec_msg}")
+                await event.reply(f"🤖 منشی خودکار:\n{sec_msg}")
             except Exception:
                 pass
             return
@@ -276,6 +267,13 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             except Exception:
                 pass
 
+        # ✅ پاسخ خودکار محبت‌آمیز به دوستان (فقط در پیوی)
+        if event.is_private and db.is_friend(owner_id, sender_id):
+            try:
+                await event.reply(random.choice(FRIEND_REPLIES))
+            except Exception:
+                pass
+
         # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
             try:
@@ -290,30 +288,17 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             except Exception:
                 pass
 
-        # ... (کدهای قبلی مثل ذخیره مدیا و سین خودکار و منشی و ری‌اکشن) ...
+        # ✅ قفل پیوی (حذف پیام ورودی در پیوی)
+        if db.get_setting(owner_id, "private_lock_active") == "1" and event.is_private:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
 
-    # ✅ پاسخ خودکار محبت‌آمیز به دوستان (فقط در پیوی)
-    if event.is_private and db.is_friend(owner_id, sender_id):
-        try:
-            await event.reply(random.choice(FRIEND_REPLIES))
-        except Exception:
-            pass
-
-    # ✅ قفل پیوی (حذف پیام ورودی در پیوی)
-    # ⚠️ نکته فنی مهم: تلگرام به اکانت‌های معمولی اجازه حذف "دوطرفه" پیام ورودی دیگران را نمی‌دهد.
-    # این کد پیام را از سمت اکانت شما (سلف) پاک می‌کند که بهترین حالت ممکن در API تلگرام است.
-    if db.get_setting(owner_id, "private_lock_active") == "1" and event.is_private:
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-
-    # ❌ (بخش ضد فحش که قبلاً اینجا بود کاملاً حذف شد)
     @cl.on(events.NewMessage(outgoing=True))
     async def on_outgoing(event):
         text = event.raw_text.strip()
 
-        # دستورات همیشه فعال
         if text == "سلف روشن":
             db.set_setting(owner_id, "self_bot_active", "1")
             await _safe_edit(event, owner_id, "✅ سلف‌بات روشن شد.")
