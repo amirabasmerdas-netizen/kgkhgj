@@ -11,7 +11,7 @@ def check_forced_channel(user_id):
     """بررسی می‌کند آیا کاربر عضو کانال اجباری هست یا خیر"""
     forced_ch = getattr(config, 'FORCED_CHANNEL', None)
     if not forced_ch or forced_ch == "@YourChannelID":
-        return True  # اگر کانال تنظیم نشده باشد، اجازه عبور می‌دهد
+        return True
     
     try:
         chat_member = _bot.get_chat_member(forced_ch, user_id)
@@ -40,7 +40,6 @@ def start_token_bot():
         _bot = None
         return
 
-    # حذف webhook قبلی و پاک کردن pending updates (جلوگیری از خطای 409)
     import time as _time
     for attempt in range(3):
         try:
@@ -52,7 +51,6 @@ def start_token_bot():
             print(f"⚠️ delete_webhook (تلاش {attempt+1}): {e}")
             _time.sleep(3)
 
-    # ─── تابع کمکی برای نمایش پیام عضویت اجباری ─────────────────────────────
     def send_join_required(message):
         forced_ch = getattr(config, 'FORCED_CHANNEL', None)
         markup = types.InlineKeyboardMarkup()
@@ -66,7 +64,6 @@ def start_token_bot():
             reply_markup=markup
         )
 
-    # ─── /start ─────────────────────────────────────────────────────────────
     @_bot.message_handler(commands=["start"])
     def cmd_start(message):
         tg_id = message.from_user.id
@@ -109,7 +106,6 @@ def start_token_bot():
             )
             return
 
-        # ✅ بررسی عضویت اجباری برای کاربران ثبت‌نام کرده
         if not check_forced_channel(tg_id):
             send_join_required(message)
             return
@@ -131,7 +127,6 @@ def start_token_bot():
         if site_url:
             _bot.send_message(message.chat.id, "🔗 از دکمه زیر به پنل دسترسی داشته باشید:", reply_markup=site_markup)
 
-    # ─── هندلر بررسی عضویت (دکمه اینلاین) ────────────────────────────────────
     @_bot.callback_query_handler(func=lambda call: call.data == "check_join")
     def callback_check_join(call):
         if check_forced_channel(call.from_user.id):
@@ -144,7 +139,6 @@ def start_token_bot():
         else:
             _bot.answer_callback_query(call.id, "هنوز عضو نشده‌اید! ❌\nلطفاً ابتدا در کانال عضو شوید.", show_alert=True)
 
-    # ─── موجودی ─────────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("💰 موجودی", "/balance"))
     @_bot.message_handler(commands=["balance"])
     def cmd_balance(message):
@@ -167,7 +161,6 @@ def start_token_bot():
             f"⚡ هر ۲ توکن = ۲ ساعت سلف روشن",
         )
 
-    # ─── هدیه روزانه ────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🎁 هدیه روزانه", "/daily"))
     @_bot.message_handler(commands=["daily"])
     def cmd_daily(message):
@@ -186,11 +179,11 @@ def start_token_bot():
         else:
             _bot.reply_to(message, msg)
 
-    # ─── رفرال ──────────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🔗 رفرال", "/referral"))
     @_bot.message_handler(commands=["referral"])
     def cmd_referral(message):
-        if not check_forced_channel(message.from.user.id):
+        # ✅ اصلاح تایپو: message.from.user.id -> message.from_user.id
+        if not check_forced_channel(message.from_user.id):
             send_join_required(message)
             return
 
@@ -209,7 +202,6 @@ def start_token_bot():
             f"لینک را کپی کرده و برای دوستانتان بفرستید!",
         )
 
-    # ─── خرید توکن ──────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🛒 خرید توکن", "/buy"))
     @_bot.message_handler(commands=["buy"])
     def cmd_buy(message):
@@ -235,7 +227,6 @@ def start_token_bot():
             reply_markup=markup if config.OWNER_USERNAME else None,
         )
 
-    # ─── دستور /give (فقط مالک) ─────────────────────────────────────────────
     @_bot.message_handler(commands=["give"])
     def cmd_give(message):
         if message.from_user.id != config.OWNER_TG_ID:
@@ -282,7 +273,6 @@ def start_token_bot():
             except Exception:
                 pass
 
-    # ─── دستور /users (فقط مالک - لیست کاربران) ────────────────────────────
     @_bot.message_handler(commands=["users"])
     def cmd_users(message):
         if message.from_user.id != config.OWNER_TG_ID:
@@ -297,7 +287,6 @@ def start_token_bot():
             lines.append(f"• <b>{acc['username']}</b> — ID:{acc['id']} — 🪙{bal}")
         _bot.reply_to(message, "\n".join(lines))
 
-    # ─── پیام‌های متنی ناشناخته ──────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: True)
     def cmd_unknown(message):
         account = db.get_account_by_tg_id(message.from_user.id)
