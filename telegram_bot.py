@@ -6,7 +6,16 @@ import config
 
 _bot = None
 BOT_USERNAME = None
-
+def check_forced_channel(user_id):
+    """بررسی می‌کند آیا کاربر عضو کانال اجباری هست یا خیر"""
+    if not config.FORCED_CHANNEL or config.FORCED_CHANNEL == "@YourChannelID":
+        return True  # اگر کانال تنظیم نشده باشد، اجازه عبور می‌دهد
+    
+    try:
+        chat_member = _bot.get_chat_member(config.FORCED_CHANNEL, user_id)
+        return chat_member.status in ['member', 'administrator', 'creator']
+    except Exception:
+        return False
 
 def get_bot():
     return _bot
