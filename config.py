@@ -28,3 +28,8 @@ SESSION_HOURS = 2
 DAILY_TOKEN_GIFT = 1
 REFERRAL_TOKENS = 50
 WELCOME_TOKENS = 10
+# ... (سایر تنظیمات) ...
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")  # آیدی شما برای دکمه خرید
+# آیدی کانال یا گروهی که کاربر باید عضو باشد (با @ شروع شود)
+# اگر نمی‌خواهید فعلاً فعال باشد، آن را خالی بگذارید: ""
+FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "@YourChannelID") 
